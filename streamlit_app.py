@@ -5,7 +5,6 @@ st.set_page_config(page_title="CSV Combiner", layout="wide")
 st.title("CSV Combiner")
 st.write("Combine CSV files with different layouts — map columns from each file into shared output categories, then download.")
 
-# ── Category definitions ───────────────────────────────────────────────────────
 CATEGORIES = [
     {"key": "date",      "label": "Date",      "synonyms": ["date","Date","DATE","created_at","created","timestamp","published","published_at","pub_date","datetime","publication_date","publishedAt","Published Date"]},
     {"key": "url",       "label": "URL",        "synonyms": ["url","URL","Url","link","Link","href","source_url","webpage","web_url","article_url","page_url"]},
@@ -59,6 +58,14 @@ def flat_columns(df):
     return [str(c) for c in df.columns]
 
 
+def ss_get(key, default=None):
+    return st.session_state.get(key, default)
+
+
+def ss_set(key, value):
+    st.session_state[key] = value
+
+
 # ── Upload ─────────────────────────────────────────────────────────────────────
 uploaded_files = st.file_uploader("Upload CSV files", type="csv", accept_multiple_files=True)
 if not uploaded_files:
@@ -76,25 +83,24 @@ st.caption("**Skip rows** are ignored entirely. **Header rows** contain column n
 file_configs, all_file_cols = {}, {}
 for f in uploaded_files:
     fkey = f.name
-    skip_skey = f"cfg_skip_{fkey}"
-    heads_skey = f"cfg_heads_{fkey}"
-
-    if skip_skey not in st.session_state:
-        st.session_state[skip_skey] = 0
-    if heads_skey not in st.session_state:
-        st.session_state[heads_skey] = 1
-
     with st.expander(f"**{f.name}**  ({f.size/1024:.1f} KB)", expanded=True):
         c1, c2 = st.columns(2)
         with c1:
-            st.number_input("Rows to skip", min_value=0, key=skip_skey)
+            # No key= — read return value directly into our own session state
+            skip_default = int(ss_get(f"cfg_skip_{fkey}", 0) or 0)
+            new_skip = st.number_input("Rows to skip", min_value=0, value=skip_default, step=1)
+            ss_set(f"cfg_skip_{fkey}", int(new_skip) if new_skip is not None else 0)
         with c2:
-            st.number_input("Header rows", min_value=0, key=heads_skey)
+            heads_default = int(ss_get(f"cfg_heads_{fkey}", 1) or 1)
+            new_heads = st.number_input("Header rows", min_value=0, value=heads_default, step=1)
+            ss_set(f"cfg_heads_{fkey}", int(new_heads) if new_heads is not None else 1)
 
-        cfg = {"skip_rows": int(st.session_state[skip_skey]), "header_rows": int(st.session_state[heads_skey])}
+        skip_rows = int(ss_get(f"cfg_skip_{fkey}", 0))
+        header_rows = int(ss_get(f"cfg_heads_{fkey}", 1))
+        cfg = {"skip_rows": skip_rows, "header_rows": header_rows}
         file_configs[fkey] = cfg
         try:
-            df_tmp = read_df(f, cfg["skip_rows"], cfg["header_rows"])
+            df_tmp = read_df(f, skip_rows, header_rows)
             cols = flat_columns(df_tmp)
             all_file_cols[fkey] = cols
             df_tmp.columns = cols
@@ -127,29 +133,28 @@ if not st.session_state.mapping_ids:
         mid = st.session_state.next_mid
         st.session_state.next_mid += 1
         st.session_state.mapping_ids.append(mid)
-        # mname and mcat are stored in plain session state (used as widget keys only after this)
-        st.session_state[f"mname_{mid}"] = cat_key
-        st.session_state[f"mcat_{mid}"] = cat_key
+        ss_set(f"mcat_{mid}", cat_key)
+        ss_set(f"mname_{mid}", cat_key)
         for j, uf in enumerate(uploaded_files):
             best = find_best_match(cat_key, all_file_cols.get(uf.name, []))
-            # msrc keys are shadow keys — never passed as widget key= param
-            st.session_state[f"msrc_{mid}_{j}"] = best if best else "(skip)"
+            ss_set(f"msrc_{mid}_{j}", best if best else "(skip)")
 
 to_remove = None
 
 for mid in list(st.session_state.mapping_ids):
-    cat_key = st.session_state.get(f"mcat_{mid}", "")
+    cat_key = ss_get(f"mcat_{mid}", "")
     cat_info = CAT_MAP.get(cat_key)
     badge_label = cat_info["label"].upper() if cat_info else "CUSTOM"
 
     if f"mname_{mid}" not in st.session_state:
-        st.session_state[f"mname_{mid}"] = cat_key
+        ss_set(f"mname_{mid}", cat_key)
 
     with st.container(border=True):
         h1, h2, h3 = st.columns([1, 4, 1])
         with h1:
             st.markdown(f"**{badge_label}**")
         with h2:
+            # key= is safe here: initialised above, never modified programmatically after
             st.text_input(
                 "Output column name",
                 key=f"mname_{mid}",
@@ -171,49 +176,51 @@ for mid in list(st.session_state.mapping_ids):
                 short = uf.name[:20] + "…" if len(uf.name) > 20 else uf.name
                 shadow_key = f"msrc_{mid}_{fi}"
 
-                # Initialise shadow key (plain session state, not a widget key)
                 if shadow_key not in st.session_state:
                     best = find_best_match(cat_key, all_file_cols.get(uf.name, []))
-                    st.session_state[shadow_key] = best if best else "(skip)"
+                    ss_set(shadow_key, best if best else "(skip)")
 
-                stored = st.session_state[shadow_key]
+                stored = ss_get(shadow_key, "(skip)")
                 idx = options.index(stored) if stored in options else 0
 
                 with cols_ui[ci]:
-                    # No key= here — shadow_key is managed manually below
                     chosen = st.selectbox(short, options, index=idx)
-                    st.session_state[shadow_key] = chosen  # persist selection
+                    ss_set(shadow_key, chosen)
 
 if to_remove is not None:
     if len(st.session_state.mapping_ids) > 1:
         st.session_state.mapping_ids.remove(to_remove)
     st.rerun()
 
-# Add category
+# Add category — no key= on selectbox so options can change freely
 st.write("")
-used_keys = [st.session_state.get(f"mcat_{mid}", "") for mid in st.session_state.mapping_ids]
+used_keys = [ss_get(f"mcat_{mid}", "") for mid in st.session_state.mapping_ids]
 available_cats = [c for c in CATEGORIES if c["key"] not in used_keys]
 
 if available_cats:
     add_col1, add_col2 = st.columns([3, 1])
     with add_col1:
+        cat_options = [c["key"] for c in available_cats]
+        stored_cat = ss_get("add_cat_val", cat_options[0])
+        cat_idx = cat_options.index(stored_cat) if stored_cat in cat_options else 0
         chosen_cat = st.selectbox(
             "Add category",
-            options=[c["key"] for c in available_cats],
+            options=cat_options,
             format_func=lambda k: CAT_MAP[k]["label"],
-            key="add_cat_select",
+            index=cat_idx,
             label_visibility="collapsed",
         )
+        ss_set("add_cat_val", chosen_cat)
     with add_col2:
         if st.button("+ Add category"):
             mid = st.session_state.next_mid
             st.session_state.next_mid += 1
             st.session_state.mapping_ids.append(mid)
-            st.session_state[f"mcat_{mid}"] = chosen_cat
-            st.session_state[f"mname_{mid}"] = chosen_cat
+            ss_set(f"mcat_{mid}", chosen_cat)
+            ss_set(f"mname_{mid}", chosen_cat)
             for j, uf in enumerate(uploaded_files):
                 best = find_best_match(chosen_cat, all_file_cols.get(uf.name, []))
-                st.session_state[f"msrc_{mid}_{j}"] = best if best else "(skip)"
+                ss_set(f"msrc_{mid}_{j}", best if best else "(skip)")
             st.rerun()
 else:
     st.caption("All available categories have been added.")
@@ -223,7 +230,7 @@ st.divider()
 st.subheader("Step 3 — Combine & download")
 
 if "output_filename" not in st.session_state:
-    st.session_state["output_filename"] = "combined.csv"
+    ss_set("output_filename", "combined.csv")
 
 st.text_input("Output filename", key="output_filename")
 
@@ -231,10 +238,10 @@ st.text_input("Output filename", key="output_filename")
 def get_mappings():
     result = []
     for mid in st.session_state.mapping_ids:
-        name = st.session_state.get(f"mname_{mid}", "").strip()
+        name = ss_get(f"mname_{mid}", "").strip()
         sources = {}
         for j, uf in enumerate(uploaded_files):
-            src = st.session_state.get(f"msrc_{mid}_{j}", "(skip)")
+            src = ss_get(f"msrc_{mid}_{j}", "(skip)")
             sources[uf.name] = "" if src == "(skip)" else src
         result.append({"output_name": name, "sources": sources})
     return result
@@ -284,7 +291,7 @@ if st.button("Combine & Download", disabled=not valid):
             st.write(f"- **{name}**: {len(df):,} rows")
         st.write(f"**Total: {len(combined):,} rows — {len(ref_cols)} output column{'s' if len(ref_cols) != 1 else ''}**")
 
-        fname = st.session_state.get("output_filename", "combined").strip() or "combined"
+        fname = (ss_get("output_filename", "combined") or "combined").strip()
         if not fname.lower().endswith(".csv"):
             fname += ".csv"
         st.download_button(
