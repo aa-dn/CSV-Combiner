@@ -83,15 +83,22 @@ st.caption("**Skip rows** are ignored entirely. **Header rows** contain column n
 file_configs, all_file_cols = {}, {}
 for f in uploaded_files:
     fkey = f.name
+    skip_key = f"skip__{fkey}"
+    heads_key = f"heads__{fkey}"
+    if skip_key not in st.session_state:
+        st.session_state[skip_key] = 0
+    if heads_key not in st.session_state:
+        st.session_state[heads_key] = 1
+
     with st.expander(f"**{f.name}**  ({f.size/1024:.1f} KB)", expanded=True):
         c1, c2 = st.columns(2)
         with c1:
-            new_skip = st.number_input("Rows to skip", min_value=0, value=0, step=1)
+            st.number_input("Rows to skip", min_value=0, key=skip_key)
         with c2:
-            new_heads = st.number_input("Header rows", min_value=0, value=1, step=1)
+            st.number_input("Header rows", min_value=0, key=heads_key)
 
-        skip_rows = int(new_skip) if new_skip is not None else 0
-        header_rows = int(new_heads) if new_heads is not None else 1
+        skip_rows = int(st.session_state[skip_key] or 0)
+        header_rows = int(st.session_state[heads_key] or 1)
         cfg = {"skip_rows": skip_rows, "header_rows": header_rows}
         file_configs[fkey] = cfg
         try:
