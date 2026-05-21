@@ -31,16 +31,13 @@ def find_best_match(category_key, file_cols):
     cat = CAT_MAP.get(category_key)
     if not cat:
         return ""
-    # Exact synonym match
     for syn in cat["synonyms"]:
         if syn in file_cols:
             return syn
-    # Case-insensitive synonym match
     lower_cols = {c.lower(): c for c in file_cols}
     for syn in cat["synonyms"]:
         if syn.lower() in lower_cols:
             return lower_cols[syn.lower()]
-    # Partial: column contains the key
     for col in file_cols:
         if category_key.lower() in col.lower():
             return col
@@ -77,20 +74,26 @@ st.divider()
 st.subheader("Step 1 — Configure headers")
 st.caption("**Skip rows** are ignored entirely. **Header rows** contain column names used to auto-populate dropdowns in Step 2.")
 
-if "file_configs" not in st.session_state:
-    st.session_state.file_configs = {}
-
 file_configs, all_file_cols = {}, {}
 for f in uploaded_files:
     key = f.name
-    prev = st.session_state.file_configs.get(key, {"skip_rows": 0, "header_rows": 1})
+    skip_key = f"skip_{key}"
+    heads_key = f"heads_{key}"
+
+    # Initialize session state defaults before widget render
+    if skip_key not in st.session_state:
+        st.session_state[skip_key] = 0
+    if heads_key not in st.session_state:
+        st.session_state[heads_key] = 1
+
     with st.expander(f"**{f.name}**  ({f.size/1024:.1f} KB)", expanded=True):
         c1, c2 = st.columns(2)
         with c1:
-            skip = st.number_input("Rows to skip", min_value=0, value=prev["skip_rows"], key=f"skip_{key}")
+            st.number_input("Rows to skip", min_value=0, key=skip_key)
         with c2:
-            heads = st.number_input("Header rows", min_value=0, value=prev["header_rows"], key=f"heads_{key}")
-        cfg = {"skip_rows": int(skip), "header_rows": int(heads)}
+            st.number_input("Header rows", min_value=0, key=heads_key)
+
+        cfg = {"skip_rows": int(st.session_state[skip_key]), "header_rows": int(st.session_state[heads_key])}
         file_configs[key] = cfg
         try:
             df_tmp = read_df(f, cfg["skip_rows"], cfg["header_rows"])
@@ -103,7 +106,6 @@ for f in uploaded_files:
         except Exception as e:
             all_file_cols[key] = []
             st.error(f"Could not read: {e}")
-st.session_state.file_configs = file_configs
 
 # ── Step 2: Map columns ────────────────────────────────────────────────────────
 st.divider()
@@ -142,6 +144,10 @@ for mid in list(st.session_state.mapping_ids):
     cat_info = CAT_MAP.get(cat_key)
     badge_label = cat_info["label"].upper() if cat_info else "CUSTOM"
 
+    # Ensure mname key exists
+    if f"mname_{mid}" not in st.session_state:
+        st.session_state[f"mname_{mid}"] = cat_key
+
     with st.container(border=True):
         h1, h2, h3 = st.columns([1, 4, 1])
         with h1:
@@ -161,12 +167,19 @@ for mid in list(st.session_state.mapping_ids):
                 fi = row_start + ci
                 options = ["(skip)"] + all_file_cols.get(f.name, [])
                 short = f.name[:20] + "…" if len(f.name) > 20 else f.name
+                src_key = f"msrc_{mid}_{fi}"
+
+                # Initialize with best match if not yet set
+                if src_key not in st.session_state:
+                    best = find_best_match(cat_key, all_file_cols.get(f.name, []))
+                    st.session_state[src_key] = best if best else "(skip)"
+
+                # Ensure current value is still valid
+                if st.session_state[src_key] not in options:
+                    st.session_state[src_key] = "(skip)"
+
                 with cols_ui[ci]:
-                    current = st.session_state.get(f"msrc_{mid}_{fi}", "(skip)")
-                    if current not in options:
-                        current = "(skip)"
-                    st.selectbox(short, options, key=f"msrc_{mid}_{fi}",
-                                 index=options.index(current) if current in options else 0)
+                    st.selectbox(short, options, key=src_key)
 
 if to_remove is not None:
     if len(st.session_state.mapping_ids) > 1:
@@ -206,7 +219,10 @@ else:
 st.divider()
 st.subheader("Step 3 — Combine & download")
 
-output_filename = st.text_input("Output filename", value="combined.csv")
+if "output_filename" not in st.session_state:
+    st.session_state["output_filename"] = "combined.csv"
+
+st.text_input("Output filename", key="output_filename")
 
 
 def get_mappings():
@@ -266,7 +282,7 @@ if st.button("Combine & Download", disabled=not valid):
             st.write(f"- **{name}**: {len(df):,} rows")
         st.write(f"**Total: {len(combined):,} rows — {len(ref_cols)} output column{'s' if len(ref_cols)!=1 else ''}**")
 
-        fname = output_filename.strip() or "combined.csv"
+        fname = st.session_state["output_filename"].strip() or "combined.csv"
         if not fname.lower().endswith(".csv"):
             fname += ".csv"
         st.download_button(
