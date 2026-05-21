@@ -86,17 +86,12 @@ for f in uploaded_files:
     with st.expander(f"**{f.name}**  ({f.size/1024:.1f} KB)", expanded=True):
         c1, c2 = st.columns(2)
         with c1:
-            # No key= — read return value directly into our own session state
-            skip_default = int(ss_get(f"cfg_skip_{fkey}", 0) or 0)
-            new_skip = st.number_input("Rows to skip", min_value=0, value=skip_default, step=1)
-            ss_set(f"cfg_skip_{fkey}", int(new_skip) if new_skip is not None else 0)
+            new_skip = st.number_input("Rows to skip", min_value=0, value=0, step=1)
         with c2:
-            heads_default = int(ss_get(f"cfg_heads_{fkey}", 1) or 1)
-            new_heads = st.number_input("Header rows", min_value=0, value=heads_default, step=1)
-            ss_set(f"cfg_heads_{fkey}", int(new_heads) if new_heads is not None else 1)
+            new_heads = st.number_input("Header rows", min_value=0, value=1, step=1)
 
-        skip_rows = int(ss_get(f"cfg_skip_{fkey}", 0))
-        header_rows = int(ss_get(f"cfg_heads_{fkey}", 1))
+        skip_rows = int(new_skip) if new_skip is not None else 0
+        header_rows = int(new_heads) if new_heads is not None else 1
         cfg = {"skip_rows": skip_rows, "header_rows": header_rows}
         file_configs[fkey] = cfg
         try:
