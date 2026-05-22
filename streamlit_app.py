@@ -197,35 +197,89 @@ if to_remove is not None:
 # Add category — no key= on selectbox so options can change freely
 st.write("")
 used_keys = [ss_get(f"mcat_{mid}", "") for mid in st.session_state.mapping_ids]
+used_output_names = {ss_get(f"mname_{mid}", "") for mid in st.session_state.mapping_ids}
 available_cats = [c for c in CATEGORIES if c["key"] not in used_keys]
 
-if available_cats:
-    add_col1, add_col2 = st.columns([3, 1])
+# Collect every unique column across all uploaded files
+all_unique_file_cols = []
+_seen_cols = set()
+for _cols in all_file_cols.values():
+    for _col in _cols:
+        if _col not in _seen_cols:
+            all_unique_file_cols.append(_col)
+            _seen_cols.add(_col)
+
+# Build combined option list: predefined categories first, then all file columns not already mapped
+add_options = []
+add_option_labels = {}
+
+for c in available_cats:
+    key = f"cat:{c['key']}"
+    add_options.append(key)
+    add_option_labels[key] = c["label"]
+
+for col in all_unique_file_cols:
+    if col not in used_output_names:
+        key = f"col:{col}"
+        add_options.append(key)
+        add_option_labels[key] = col
+
+if add_options:
+    add_col1, add_col2, add_col3 = st.columns([3, 1, 1])
     with add_col1:
-        cat_options = [c["key"] for c in available_cats]
-        stored_cat = ss_get("add_cat_val", cat_options[0])
-        cat_idx = cat_options.index(stored_cat) if stored_cat in cat_options else 0
-        chosen_cat = st.selectbox(
-            "Add category",
-            options=cat_options,
-            format_func=lambda k: CAT_MAP[k]["label"],
-            index=cat_idx,
+        stored_add = ss_get("add_cat_val", add_options[0])
+        add_idx = add_options.index(stored_add) if stored_add in add_options else 0
+        chosen_option = st.selectbox(
+            "Add column",
+            options=add_options,
+            format_func=lambda k: add_option_labels.get(k, k),
+            index=add_idx,
             label_visibility="collapsed",
         )
-        ss_set("add_cat_val", chosen_cat)
+        ss_set("add_cat_val", chosen_option)
+    with add_col3:
+        if st.button("Select all", help="Add all remaining columns at once"):
+            for opt in list(add_options):
+                mid = st.session_state.next_mid
+                st.session_state.next_mid += 1
+                st.session_state.mapping_ids.append(mid)
+                if opt.startswith("cat:"):
+                    cat_key = opt[4:]
+                    ss_set(f"mcat_{mid}", cat_key)
+                    ss_set(f"mname_{mid}", cat_key)
+                    for j, uf in enumerate(uploaded_files):
+                        best = find_best_match(cat_key, all_file_cols.get(uf.name, []))
+                        ss_set(f"msrc_{mid}_{j}", best if best else "(skip)")
+                else:
+                    col_name = opt[4:]
+                    ss_set(f"mcat_{mid}", "__custom__")
+                    ss_set(f"mname_{mid}", col_name)
+                    for j, uf in enumerate(uploaded_files):
+                        file_cols = all_file_cols.get(uf.name, [])
+                        ss_set(f"msrc_{mid}_{j}", col_name if col_name in file_cols else "(skip)")
+            st.rerun()
     with add_col2:
-        if st.button("+ Add category"):
+        if st.button("+ Add column"):
             mid = st.session_state.next_mid
             st.session_state.next_mid += 1
             st.session_state.mapping_ids.append(mid)
-            ss_set(f"mcat_{mid}", chosen_cat)
-            ss_set(f"mname_{mid}", chosen_cat)
-            for j, uf in enumerate(uploaded_files):
-                best = find_best_match(chosen_cat, all_file_cols.get(uf.name, []))
-                ss_set(f"msrc_{mid}_{j}", best if best else "(skip)")
+            if chosen_option.startswith("cat:"):
+                cat_key = chosen_option[4:]
+                ss_set(f"mcat_{mid}", cat_key)
+                ss_set(f"mname_{mid}", cat_key)
+                for j, uf in enumerate(uploaded_files):
+                    best = find_best_match(cat_key, all_file_cols.get(uf.name, []))
+                    ss_set(f"msrc_{mid}_{j}", best if best else "(skip)")
+            else:
+                col_name = chosen_option[4:]
+                ss_set(f"mcat_{mid}", "__custom__")
+                ss_set(f"mname_{mid}", col_name)
+                for j, uf in enumerate(uploaded_files):
+                    file_cols = all_file_cols.get(uf.name, [])
+                    ss_set(f"msrc_{mid}_{j}", col_name if col_name in file_cols else "(skip)")
             st.rerun()
 else:
-    st.caption("All available categories have been added.")
+    st.caption("All columns from all files have been added.")
 
 # ── Step 3: Combine ────────────────────────────────────────────────────────────
 st.divider()
