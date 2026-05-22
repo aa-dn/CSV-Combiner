@@ -186,7 +186,7 @@ for mid in list(st.session_state.mapping_ids):
                 idx = options.index(stored) if stored in options else 0
 
                 with cols_ui[ci]:
-                    chosen = st.selectbox(short, options, index=idx)
+                    chosen = st.selectbox(short, options, index=idx, key=f"sel_{mid}_{fi}")
                     ss_set(shadow_key, chosen)
 
 if to_remove is not None:
