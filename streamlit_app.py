@@ -129,8 +129,10 @@ if not any_headers:
 if "mapping_ids" not in st.session_state:
     st.session_state.mapping_ids = []
     st.session_state.next_mid = 0
+    st.session_state.mappings_initialized = False
 
-if not st.session_state.mapping_ids:
+if not st.session_state.mapping_ids and not ss_get("mappings_initialized", False):
+    st.session_state.mappings_initialized = True
     for cat_key in DEFAULT_KEYS:
         mid = st.session_state.next_mid
         st.session_state.next_mid += 1
@@ -224,8 +226,12 @@ for col in all_unique_file_cols:
         add_options.append(key)
         add_option_labels[key] = col
 
+def _remove_all_mappings():
+    st.session_state.mapping_ids = []
+    st.session_state.mappings_initialized = True
+
 if add_options:
-    add_col1, add_col2, add_col3 = st.columns([3, 1, 1])
+    add_col1, add_col2, add_col3, add_col4 = st.columns([3, 1, 1, 1])
     with add_col1:
         stored_add = ss_get("add_cat_val", add_options[0])
         add_idx = add_options.index(stored_add) if stored_add in add_options else 0
@@ -237,6 +243,26 @@ if add_options:
             label_visibility="collapsed",
         )
         ss_set("add_cat_val", chosen_option)
+    with add_col2:
+        if st.button("+ Add column"):
+            mid = st.session_state.next_mid
+            st.session_state.next_mid += 1
+            st.session_state.mapping_ids.append(mid)
+            if chosen_option.startswith("cat:"):
+                cat_key = chosen_option[4:]
+                ss_set(f"mcat_{mid}", cat_key)
+                ss_set(f"mname_{mid}", cat_key)
+                for j, uf in enumerate(uploaded_files):
+                    best = find_best_match(cat_key, all_file_cols.get(uf.name, []))
+                    ss_set(f"msrc_{mid}_{j}", best if best else "(skip)")
+            else:
+                col_name = chosen_option[4:]
+                ss_set(f"mcat_{mid}", "__custom__")
+                ss_set(f"mname_{mid}", col_name)
+                for j, uf in enumerate(uploaded_files):
+                    file_cols = all_file_cols.get(uf.name, [])
+                    ss_set(f"msrc_{mid}_{j}", col_name if col_name in file_cols else "(skip)")
+            st.rerun()
     with add_col3:
         if st.button("Select all", help="Add all remaining columns at once"):
             for opt in list(add_options):
@@ -258,28 +284,18 @@ if add_options:
                         file_cols = all_file_cols.get(uf.name, [])
                         ss_set(f"msrc_{mid}_{j}", col_name if col_name in file_cols else "(skip)")
             st.rerun()
-    with add_col2:
-        if st.button("+ Add column"):
-            mid = st.session_state.next_mid
-            st.session_state.next_mid += 1
-            st.session_state.mapping_ids.append(mid)
-            if chosen_option.startswith("cat:"):
-                cat_key = chosen_option[4:]
-                ss_set(f"mcat_{mid}", cat_key)
-                ss_set(f"mname_{mid}", cat_key)
-                for j, uf in enumerate(uploaded_files):
-                    best = find_best_match(cat_key, all_file_cols.get(uf.name, []))
-                    ss_set(f"msrc_{mid}_{j}", best if best else "(skip)")
-            else:
-                col_name = chosen_option[4:]
-                ss_set(f"mcat_{mid}", "__custom__")
-                ss_set(f"mname_{mid}", col_name)
-                for j, uf in enumerate(uploaded_files):
-                    file_cols = all_file_cols.get(uf.name, [])
-                    ss_set(f"msrc_{mid}_{j}", col_name if col_name in file_cols else "(skip)")
+    with add_col4:
+        if st.button("Remove all", key="btn_remove_all", help="Clear all column mappings"):
+            _remove_all_mappings()
             st.rerun()
 else:
-    st.caption("All columns from all files have been added.")
+    done_col1, done_col2 = st.columns([5, 1])
+    with done_col1:
+        st.caption("All columns from all files have been added.")
+    with done_col2:
+        if st.button("Remove all", key="btn_remove_all", help="Clear all column mappings"):
+            _remove_all_mappings()
+            st.rerun()
 
 # ── Step 3: Combine ────────────────────────────────────────────────────────────
 st.divider()
